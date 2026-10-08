@@ -1,0 +1,67 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+#include <cctype>
+#include <sstream>
+using namespace std;
+
+enum TokenType { T_INT,T_FLOAT,T_BOOL,T_IF,T_ELSE,T_WHILE,T_TRUE,T_FALSE,T_IDENTIFIER,T_NUMBER,T_SEMICOLON,T_ASSIGN,T_PLUS,T_MINUS,T_MUL,T_DIV,T_LT,T_GT,T_LE,T_GE,T_EQ,T_NE,T_LPAREN,T_RPAREN,T_LBRACE,T_RBRACE,T_END,T_INVALID };
+struct Token { TokenType type; string lexeme; int line; };
+string tokenName(TokenType t){switch(t){case T_INT:return"INT";case T_FLOAT:return"FLOAT";case T_BOOL:return"BOOL";case T_IF:return"IF";case T_ELSE:return"ELSE";case T_WHILE:return"WHILE";case T_TRUE:return"TRUE";case T_FALSE:return"FALSE";case T_IDENTIFIER:return"IDENTIFIER";case T_NUMBER:return"NUMBER";case T_SEMICOLON:return"SEMICOLON";case T_ASSIGN:return"ASSIGN";case T_PLUS:return"PLUS";case T_MINUS:return"MINUS";case T_MUL:return"MUL";case T_DIV:return"DIV";case T_LT:return"LT";case T_GT:return"GT";case T_LE:return"LE";case T_GE:return"GE";case T_EQ:return"EQ";case T_NE:return"NE";case T_LPAREN:return"LPAREN";case T_RPAREN:return"RPAREN";case T_LBRACE:return"LBRACE";case T_RBRACE:return"RBRACE";case T_END:return"END";default:return"INVALID";}}
+class Lexer {
+ string src; size_t pos=0; int line=1;
+public: explicit Lexer(const string&s):src(s){}
+ vector<Token> tokenize(){vector<Token> out;while(pos<src.size()){char c=src[pos];if(c=='\n'){line++;pos++;continue;}if(isspace((unsigned char)c)){pos++;continue;}
+ if(isalpha((unsigned char)c)||c=='_'){size_t st=pos++;while(pos<src.size()&&(isalnum((unsigned char)src[pos])||src[pos]=='_'))pos++;string w=src.substr(st,pos-st);TokenType t=T_IDENTIFIER;if(w=="int")t=T_INT;else if(w=="float")t=T_FLOAT;else if(w=="bool")t=T_BOOL;else if(w=="if")t=T_IF;else if(w=="else")t=T_ELSE;else if(w=="while")t=T_WHILE;else if(w=="true")t=T_TRUE;else if(w=="false")t=T_FALSE;out.push_back({t,w,line});continue;}
+ if(isdigit((unsigned char)c)){size_t st=pos++;bool dot=false;while(pos<src.size()&&(isdigit((unsigned char)src[pos])||src[pos]=='.')){if(src[pos]=='.'){if(dot)break;dot=true;}pos++;}out.push_back({T_NUMBER,src.substr(st,pos-st),line});continue;}
+ auto add=[&](TokenType t,string s){out.push_back({t,s,line});pos+=s.size();};if(pos+1<src.size()){string two=src.substr(pos,2);if(two=="<="){add(T_LE,two);continue;}if(two==">="){add(T_GE,two);continue;}if(two=="=="){add(T_EQ,two);continue;}if(two=="!="){add(T_NE,two);continue;}}
+ switch(c){case ';':add(T_SEMICOLON,";");break;case '=':add(T_ASSIGN,"=");break;case '+':add(T_PLUS,"+");break;case '-':add(T_MINUS,"-");break;case '*':add(T_MUL,"*");break;case '/':add(T_DIV,"/");break;case '<':add(T_LT,"<");break;case '>':add(T_GT,">");break;case '(':add(T_LPAREN,"(");break;case ')':add(T_RPAREN,")");break;case '{':add(T_LBRACE,"{");break;case '}':add(T_RBRACE,"}");break;default:out.push_back({T_INVALID,string(1,c),line});pos++;}}
+out.push_back({T_END,"EOF",line});return out;}
+};
+enum ValueType{TYPE_INT,TYPE_FLOAT,TYPE_BOOL,TYPE_ERROR};
+string typeName(ValueType t){if(t==TYPE_INT)return"int";if(t==TYPE_FLOAT)return"float";if(t==TYPE_BOOL)return"bool";return"error";}
+struct Symbol{string name;ValueType type;int line;};
+struct Expr{virtual ~Expr()=default;};using ExprPtr=shared_ptr<Expr>;
+struct Literal:Expr{string value;ValueType type;Literal(string v,ValueType t):value(v),type(t){}};
+struct Variable:Expr{string name;int line;Variable(string n,int l):name(n),line(l){}};
+struct Unary:Expr{string op;ExprPtr right;Unary(string o,ExprPtr r):op(o),right(r){}};
+struct Binary:Expr{ExprPtr left,right;string op;Binary(ExprPtr l,string o,ExprPtr r):left(l),right(r),op(o){}};
+struct Stmt{virtual ~Stmt()=default;};using StmtPtr=shared_ptr<Stmt>;
+struct Block:Stmt{vector<StmtPtr> statements;};
+struct Declaration:Stmt{string name;ValueType type;int line;ExprPtr init;Declaration(string n,ValueType t,int l,ExprPtr e):name(n),type(t),line(l),init(e){}};
+struct Assignment:Stmt{string name;int line;ExprPtr value;Assignment(string n,int l,ExprPtr e):name(n),line(l),value(e){}};
+struct IfStmt:Stmt{ExprPtr cond;shared_ptr<Block> thenBlock,elseBlock;IfStmt(ExprPtr c,shared_ptr<Block> t,shared_ptr<Block> e):cond(c),thenBlock(t),elseBlock(e){}};
+struct WhileStmt:Stmt{ExprPtr cond;shared_ptr<Block> body;WhileStmt(ExprPtr c,shared_ptr<Block>b):cond(c),body(b){}};
+class Parser{
+ vector<Token> ts;size_t p=0;vector<string> errors;bool syntaxOK=true;unordered_map<string,Symbol> symbols;vector<StmtPtr> program;
+ Token peek(){return ts[p];}Token prev(){return ts[p-1];}bool check(TokenType t){return peek().type==t;}bool match(TokenType t){if(check(t)){p++;return true;}return false;}
+ void syn(string m){syntaxOK=false;errors.push_back("Syntax error at line "+to_string(peek().line)+": "+m);}void sem(string m,int l){errors.push_back("Semantic error at line "+to_string(l)+": "+m);}
+ void sync(){while(!check(T_END)){if(p>0&&prev().type==T_SEMICOLON)return;if(check(T_INT)||check(T_FLOAT)||check(T_BOOL)||check(T_IF)||check(T_WHILE))return;p++;}}
+ bool numeric(ValueType t){return t==TYPE_INT||t==TYPE_FLOAT;}
+ ExprPtr expression(){return equality();}
+ ExprPtr equality(){auto e=relational();while(check(T_EQ)||check(T_NE)){string op=peek().lexeme;p++;e=make_shared<Binary>(e,op,relational());}return e;}
+ ExprPtr relational(){auto e=term();while(check(T_LT)||check(T_GT)||check(T_LE)||check(T_GE)){string op=peek().lexeme;p++;e=make_shared<Binary>(e,op,term());}return e;}
+ ExprPtr term(){auto e=factor();while(check(T_PLUS)||check(T_MINUS)){string op=peek().lexeme;p++;e=make_shared<Binary>(e,op,factor());}return e;}
+ ExprPtr factor(){auto e=unary();while(check(T_MUL)||check(T_DIV)){string op=peek().lexeme;p++;e=make_shared<Binary>(e,op,unary());}return e;}
+ ExprPtr unary(){if(match(T_MINUS))return make_shared<Unary>("-",unary());return primary();}
+ ExprPtr primary(){if(match(T_NUMBER)){string v=prev().lexeme;return make_shared<Literal>(v,v.find('.')!=string::npos?TYPE_FLOAT:TYPE_INT);}if(match(T_TRUE)||match(T_FALSE))return make_shared<Literal>(prev().lexeme,TYPE_BOOL);if(match(T_IDENTIFIER))return make_shared<Variable>(prev().lexeme,prev().line);if(match(T_LPAREN)){auto e=expression();if(!match(T_RPAREN))syn("expected ')'");return e;}syn("expected expression");if(!check(T_END))p++;return make_shared<Literal>("0",TYPE_ERROR);}
+ shared_ptr<Block> block(){auto b=make_shared<Block>();if(!match(T_LBRACE)){syn("expected '{'");return b;}while(!check(T_RBRACE)&&!check(T_END)){size_t old=p;auto s=statement();if(s)b->statements.push_back(s);if(p==old)p++;}if(!match(T_RBRACE))syn("expected '}'");return b;}
+ StmtPtr statement(){if(check(T_INT)||check(T_FLOAT)||check(T_BOOL)){Token typ=peek();p++;ValueType t=typ.type==T_INT?TYPE_INT:typ.type==T_FLOAT?TYPE_FLOAT:TYPE_BOOL;if(!match(T_IDENTIFIER)){syn("expected identifier after type");sync();return nullptr;}Token id=prev();ExprPtr init=nullptr;if(match(T_ASSIGN))init=expression();if(!match(T_SEMICOLON)){syn("expected ';' after declaration");sync();}if(symbols.count(id.lexeme))sem("redeclaration of '"+id.lexeme+"'",id.line);else symbols[id.lexeme]={id.lexeme,t,id.line};return make_shared<Declaration>(id.lexeme,t,id.line,init);}
+ if(check(T_IDENTIFIER)){Token id=peek();p++;if(!match(T_ASSIGN)){syn("expected '=' after identifier");sync();return nullptr;}auto e=expression();if(!match(T_SEMICOLON)){syn("expected ';' after assignment");sync();}if(!symbols.count(id.lexeme))sem("assignment to undeclared identifier '"+id.lexeme+"'",id.line);return make_shared<Assignment>(id.lexeme,id.line,e);}
+ if(match(T_IF)){if(!match(T_LPAREN))syn("expected '(' after if");auto c=expression();if(!match(T_RPAREN))syn("expected ')' after condition");auto tb=block();shared_ptr<Block> eb=nullptr;if(match(T_ELSE))eb=block();return make_shared<IfStmt>(c,tb,eb);}
+ if(match(T_WHILE)){if(!match(T_LPAREN))syn("expected '(' after while");auto c=expression();if(!match(T_RPAREN))syn("expected ')' after condition");return make_shared<WhileStmt>(c,block());}
+ syn("unexpected token '"+peek().lexeme+"'");sync();return nullptr;}
+ ValueType checkExpr(ExprPtr e){if(auto l=dynamic_pointer_cast<Literal>(e))return l->type;if(auto v=dynamic_pointer_cast<Variable>(e)){auto it=symbols.find(v->name);if(it==symbols.end()){sem("use of undeclared identifier '"+v->name+"'",v->line);return TYPE_ERROR;}return it->second.type;}if(auto u=dynamic_pointer_cast<Unary>(e)){auto t=checkExpr(u->right);if(t==TYPE_BOOL)sem("unary minus requires numeric operand",0);return t;}if(auto b=dynamic_pointer_cast<Binary>(e)){auto a=checkExpr(b->left),c=checkExpr(b->right);if(a==TYPE_ERROR||c==TYPE_ERROR)return TYPE_ERROR;if(b->op=="+"||b->op=="-"||b->op=="*"||b->op=="/"){if(!numeric(a)||!numeric(c)){sem("arithmetic operator requires numeric operands",0);return TYPE_ERROR;}return a==TYPE_FLOAT||c==TYPE_FLOAT?TYPE_FLOAT:TYPE_INT;}if(b->op=="<"||b->op==">"||b->op=="<="||b->op==">="){if(!numeric(a)||!numeric(c))sem("relational operator requires numeric operands",0);return TYPE_BOOL;}if(a!=c)sem("comparison operands have different types",0);return TYPE_BOOL;}return TYPE_ERROR;}
+ void semanticStmt(StmtPtr s){if(auto d=dynamic_pointer_cast<Declaration>(s)){if(d->init){auto t=checkExpr(d->init);if(t!=TYPE_ERROR&&t!=d->type)sem("cannot assign "+typeName(t)+" to variable '"+d->name+"' of type "+typeName(d->type),d->line);}}else if(auto a=dynamic_pointer_cast<Assignment>(s)){auto it=symbols.find(a->name);auto t=checkExpr(a->value);if(it!=symbols.end()&&t!=TYPE_ERROR&&t!=it->second.type)sem("type mismatch in assignment to '"+a->name+"'",a->line);}else if(auto i=dynamic_pointer_cast<IfStmt>(s)){if(checkExpr(i->cond)!=TYPE_BOOL)sem("if condition must be boolean",0);for(auto x:i->thenBlock->statements)semanticStmt(x);if(i->elseBlock)for(auto x:i->elseBlock->statements)semanticStmt(x);}else if(auto w=dynamic_pointer_cast<WhileStmt>(s)){if(checkExpr(w->cond)!=TYPE_BOOL)sem("while condition must be boolean",0);for(auto x:w->body->statements)semanticStmt(x);}else if(auto b=dynamic_pointer_cast<Block>(s)){for(auto x:b->statements)semanticStmt(x);}}
+public:explicit Parser(const vector<Token>&v):ts(v){}bool parse(){while(!check(T_END)){size_t old=p;auto s=statement();if(s)program.push_back(s);if(p==old)p++;}for(auto s:program)semanticStmt(s);return syntaxOK;}const vector<string>&getErrors()const{return errors;}const unordered_map<string,Symbol>&getSymbols()const{return symbols;}const vector<StmtPtr>&getProgram()const{return program;}
+};
+class CodeGenerator{
+ vector<string> code;int temp=0,label=0;string newTemp(){return"t"+to_string(++temp);}string newLabel(){return"L"+to_string(++label);}
+ string genExpr(ExprPtr e){if(auto l=dynamic_pointer_cast<Literal>(e))return l->value;if(auto v=dynamic_pointer_cast<Variable>(e))return v->name;if(auto u=dynamic_pointer_cast<Unary>(e)){string r=genExpr(u->right),t=newTemp();code.push_back(t+" = -"+r);return t;}if(auto b=dynamic_pointer_cast<Binary>(e)){string a=genExpr(b->left),c=genExpr(b->right),t=newTemp();code.push_back(t+" = "+a+" "+b->op+" "+c);return t;}return"0";}
+ void genStmt(StmtPtr s){if(auto d=dynamic_pointer_cast<Declaration>(s)){if(d->init)code.push_back(d->name+" = "+genExpr(d->init));else code.push_back(d->name+" = 0");}else if(auto a=dynamic_pointer_cast<Assignment>(s)){string v=genExpr(a->value);code.push_back(a->name+" = "+v);}else if(auto i=dynamic_pointer_cast<IfStmt>(s)){string c=genExpr(i->cond),otherwise=newLabel(),end=newLabel();code.push_back("ifFalse "+c+" goto "+(i->elseBlock?otherwise:end));for(auto x:i->thenBlock->statements)genStmt(x);if(i->elseBlock){code.push_back("goto "+end);code.push_back(otherwise+":");for(auto x:i->elseBlock->statements)genStmt(x);}code.push_back(end+":");}else if(auto w=dynamic_pointer_cast<WhileStmt>(s)){string start=newLabel(),end=newLabel();code.push_back(start+":");string c=genExpr(w->cond);code.push_back("ifFalse "+c+" goto "+end);for(auto x:w->body->statements)genStmt(x);code.push_back("goto "+start);code.push_back(end+":");}else if(auto b=dynamic_pointer_cast<Block>(s)){for(auto x:b->statements)genStmt(x);}}
+public:vector<string> generate(const vector<StmtPtr>&p){for(auto s:p)genStmt(s);return code;}
+};
+int main(){cout<<"MiniLang Studio - Phase 1 + Phase 2\n";cout<<"Enter MiniLang source code. Type END on a separate line to finish.\n\n";string line,source;while(getline(cin,line)){if(line=="END")break;source+=line+"\n";}Lexer lexer(source);auto tokens=lexer.tokenize();cout<<"TOKENS\n";bool lexicalError=false;for(auto&t:tokens){if(t.type==T_END)break;cout<<t.line<<"\t"<<tokenName(t.type)<<"\t"<<t.lexeme<<"\n";if(t.type==T_INVALID){lexicalError=true;cout<<"Lexical error at line "<<t.line<<": invalid character '"<<t.lexeme<<"'\n";}}
+ Parser parser(tokens);bool syntaxOK=parser.parse();cout<<"\nSYMBOL TABLE\nName\tType\tLine\n";for(auto&x:parser.getSymbols())cout<<x.second.name<<"\t"<<typeName(x.second.type)<<"\t"<<x.second.line<<"\n";cout<<"\nANALYSIS RESULT\nSyntax Analysis: "<<(syntaxOK?"PASSED":"FAILED")<<"\n";bool semError=false;for(auto&e:parser.getErrors())if(e.find("Semantic error")!=string::npos)semError=true;cout<<"Semantic Analysis: "<<(semError?"FAILED":"PASSED")<<"\n";if(lexicalError||!parser.getErrors().empty()){cout<<"\nERRORS\n";for(auto&e:parser.getErrors())cout<<e<<"\n";}if(!lexicalError&&syntaxOK&&!semError){CodeGenerator cg;auto tac=cg.generate(parser.getProgram());cout<<"\nTHREE-ADDRESS CODE\n";for(auto&s:tac)cout<<s<<"\n";}else cout<<"\nCode generation skipped because errors were found.\n";return 0;}
